@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Quadcopter Drone with Yaw, Pitch, and Roll</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        #controlPanel {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        #droneInfo {
+            position: absolute;
+            top: 80px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="status">Status: Ready</div>
+    <div id="droneInfo"></div>
+    <div id="controlPanel">
+        <button onclick="takeoff()">Take Off</button>
+        <button onclick="land()">Land</button>
+        <button onclick="moveDrone('up')">Move Up</button>
+        <button onclick="moveDrone('down')">Move Down</button>
+        <button onclick="moveDrone('left')">Move Left</button>
+        <button onclick="moveDrone('right')">Move Right</button>
+        <button onclick="moveDrone('forward')">Move Forward</button>
+        <button onclick="moveDrone('backward')">Move Backward</button>
+        <button onclick="rotateDrone('yaw', 1)">Yaw Right</button>
+        <button onclick="rotateDrone('yaw', -1)">Yaw Left</button>
+        <button onclick="rotateDrone('pitch', 1)">Pitch Up</button>
+        <button onclick="rotateDrone('pitch', -1)">Pitch Down</button>
+        <button onclick="rotateDrone('roll', 1)">Roll Right</button>
+        <button onclick="rotateDrone('roll', -1)">Roll Left</button>
+        <button onclick="startDrawing()">Start Drawing Path</button>
+        <button onclick="stopDrawing()">Stop Drawing Path</button>
+        <button onclick="followPath()">Follow Path</button>
+        <button onclick="setBasePosition()">Set Base Position</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, drone, path, isDrawing = false, pathPoints = [];
+        let isFlying = false;
+        let basePosition = new THREE.Vector3(0, 0, 0);
+        let dronePosition = new THREE.Vector3(0, 0, 0);
+        let droneAltitude = 0;
+        let batteryLife = 100;
+        let batteryInterval;
+
+        // Set up the scene, camera, and renderer
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // Create a quadcopter drone model
+        function createQuadcopterDrone() {
+            const group = new THREE.Group();
+
+            // Drone body
+            const bodyGeometry = new THREE.BoxGeometry(1, 0.2, 1);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.castShadow = true;
+            group.add(body);
+
+            // Arms
+            const armGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.8);
+            const armMaterial = new THREE.MeshPhongMaterial({ color: 0x666666 });
+            const armPositions = [
+                [0.45, 0, 0.45],
+                [-0.45, 0, 0.45],
+                [0.45, 0, -0.45],
+                [-0.45, 0, -0.45]
+            ];
+
+            armPositions.forEach(position => {
+                const arm = new THREE.Mesh(armGeometry, armMaterial);
+                arm.position.set(...position);
+                arm.castShadow = true;
+                group.add(arm);
+            });
+
+            // Propellers
+            const propGeometry = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 32);
+            const propMaterial = new THREE.MeshPhongMaterial({ color: 0xcccccc });
+            const propPositions = [
+                [0.5, 0.1, 0.5],
+                [-0.5, 0.1, 0.5],
+                [0.5, 0.1, -0.5],
+                [-0.5, 0.1, -0.5]
+            ];
+
+            propPositions.forEach((position, index) => {
+                const propeller = new THREE.Mesh(propGeometry, propMaterial);
+                propeller.position.set(...position);
+                propeller.castShadow = true;
+                propeller.name = `propeller_${index}`;
+                group.add(propeller);
+            });
+
+            // Add a camera to the drone
+            const cameraGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+            const cameraMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+            const cameraObj = new THREE.Mesh(cameraGeometry, cameraMaterial);
+            cameraObj.position.set(0, -0.1, 0.5);
+            group.add(cameraObj);
+
+            return group;
+        }
+
+        drone = createQuadcopterDrone();
+        scene.add(drone);
+
+        // Set initial camera position
+        camera.position.set(0, 5, 10);
+        camera.lookAt(drone.position);
+
+        // Add lights
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(5, 10, 5);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 1024;
+        directionalLight.shadow.mapSize.height = 1024;
+        scene.add(directionalLight);
+
+        // Add a ground plane
+        const planeGeometry = new THREE.PlaneGeometry(100, 100);
+        const planeMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513, side: THREE.DoubleSide });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = Math.PI / 2;
+        plane.position.y = -0.25;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        // Add trees
+        function createTree(x, z) {
+            const treeGroup = new THREE.Group();
+
+            // Tree trunk
+            const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.4, 2, 8);
+            const trunkMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.position.set(0, 1, 0);
+            trunk.castShadow = true;
+            treeGroup.add(trunk);
+
+            // Tree leaves
+            const leavesGeometry = new THREE.ConeGeometry(1.5, 3, 8);
+            const leavesMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+            const leaves = new THREE.Mesh(leavesGeometry, leavesMaterial);
+            leaves.position.set(0, 3, 0);
+            leaves.castShadow = true;
+            treeGroup.add(leaves);
+
+            treeGroup.position.set(x, 0, z);
+            scene.add(treeGroup);
+        }
+
+        // Add multiple trees
+        for (let i = 0; i < 20; i++) {
+            const x = Math.random() * 80 - 40;
+            const z = Math.random() * 80 - 40;
+            createTree(x, z);
+        }
+
+        // Add rocks
+        function createRock(x, z) {
+            const rockGeometry = new THREE.DodecahedronGeometry(Math.random() * 0.5 + 0.5);
+            const rockMaterial = new THREE.MeshPhongMaterial({ color: 0x808080 });
+            const rock = new THREE.Mesh(rockGeometry, rockMaterial);
+            rock.position.set(x, 0, z);
+            rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+            rock.castShadow = true;
+            scene.add(rock);
+        }
+
+        // Add multiple rocks
+        for (let i = 0; i < 30; i++) {
+            const x = Math.random() * 80 - 40;
+            const z = Math.random() * 80 - 40;
+            createRock(x, z);
+        }
+
+        // Add a lake
+        const lakeGeometry = new THREE.CircleGeometry(10, 32);
+        const lakeMaterial = new THREE.MeshPhongMaterial({ color: 0x4169E1, transparent: true, opacity: 0.7 });
+        const lake = new THREE.Mesh(lakeGeometry, lakeMaterial);
+        lake.rotation.x = -Math.PI / 2;
+        lake.position.set(15, 0.1, -15);
+        scene.add(lake);
+
+        // Add skybox
+        const skyboxLoader = new THREE.CubeTextureLoader();
+        const skyboxTexture = skyboxLoader.load([
+            'https://threejsfundamentals.org/threejs/resources/images/skybox/px.jpg',
+            'https://threejsfundamentals.org/threejs/resources/images/skybox/nx.jpg',
+            'https://threejsfundamentals.org/threejs/resources/images/skybox/py.jpg',
+            'https://threejsfundamentals.org/threejs/resources/images/skybox/ny.jpg',
+            'https://threejsfundamentals.org/threejs/resources/images/skybox/pz.jpg',
+            'https://threejsfundamentals.org/threejs/resources/images/skybox/nz.jpg',
+        ]);
+        scene.background = skyboxTexture;
+
+        // Path to store the drawing points
+        path = new THREE.Line(
+            new THREE.BufferGeometry(),
+            new THREE.LineBasicMaterial({ color: 0xff0000 })
+        );
+        scene.add(path);
+
+        // Render the scene
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate propellers
+            if (isFlying) {
+                drone.children.forEach((child, index) => {
+                    if (child.name && child.name.startsWith('propeller')) {
+                        child.rotation.y += 0.5 * (child.name.endsWith('0') || child.name.endsWith('2') ? 1 : -1);
+                    }
+                });
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Start drawing the path
+        function startDrawing() {
+            isDrawing = true;
+            pathPoints = []; // Reset previous points
+            updateStatus("Drawing Path");
+        }
+
+        // Stop drawing the path
+        function stopDrawing() {
+            isDrawing = false;
+            updateStatus("Path Drawing Stopped");
+        }
+
+        // Draw path based on mouse position
+        window.addEventListener('mousemove', function(event) {
+            if (isDrawing && isFlying) {
+                const mouse = new THREE.Vector2(
+                    (event.clientX / window.innerWidth) * 2 - 1,
+                    -(event.clientY / window.innerHeight) * 2 + 1
+                );
+
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(mouse, camera);
+
+                const intersects = raycaster.intersectObject(plane);
+
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    pathPoints.push(point);
+
+                    const geometry = new THREE.BufferGeometry().setFromPoints(pathPoints);
+                    path.geometry.dispose();
+                    path.geometry = geometry;
+                }
+            }
+        });
+
+        // Move the drone
+        function moveDrone(direction) {
+            if (isFlying) {
+                const step = 0.5;
+                const newPosition = dronePosition.clone();
+
+                switch (direction) {
+                    case 'up':
+                        newPosition.y += step;
+                        break;
+                    case 'down':
+                        newPosition.y = Math.max(0, newPosition.y - step);
+                        break;
+                    case 'left':
+                        newPosition.x -= step;
+                        break;
+                    case 'right':
+                        newPosition.x += step;
+                        break;
+                    case 'forward':
+                        newPosition.z -= step;
+                        break;
+                    case 'backward':
+                        newPosition.z += step;
+                        break;
+                }
+
+                // Check for collisions
+                if (!checkCollision(newPosition)) {
+                    dronePosition.copy(newPosition);
+                    droneAltitude = dronePosition.y;
+                    drone.position.copy(dronePosition);
+                    camera.lookAt(drone.position);
+                    updateStatus(`Moving ${direction}`);
+                    updateDroneInfo();
+                } else {
+                    updateStatus(`Cannot move ${direction}: Obstacle detected`);
+                }
+            }
+        }
+
+        // Rotate the drone (new function)
+        function rotateDrone(axis, direction) {
+            if (isFlying) {
+                const rotationStep = 0.1;
+                switch (axis) {
+                    case 'yaw':
+                        drone.rotation.y += rotationStep * direction;
+                        break;
+                    case 'pitch':
+                        drone.rotation.x += rotationStep * direction;
+                        break;
+                    case 'roll':
+                        drone.rotation.z += rotationStep * direction;
+                        break;
+                }
+                updateStatus(`Rotating ${axis}`);
+
+                // Rotate propellers
+                drone.children.forEach((child) => {
+                    if (child.name && child.name.startsWith('propeller')) {
+                        child.rotation.y += 0.5 * (child.name.endsWith('0') || child.name.endsWith('2') ? 1 : -1);
+                    }
+                });
+            }
+        }
+
+        // Function to make the drone follow the path
+        function followPath() {
+            if (pathPoints.length > 0 && isFlying) {
+                let index = 0;
+                const interval = setInterval(function() {
+                    if (index < pathPoints.length) {
+                        const target = pathPoints[index];
+                        const direction = new THREE.Vector3().subVectors(target, dronePosition);
+                        const distance = direction.length();
+
+                        if (distance > 0.1) {
+                            direction.normalize().multiplyScalar(0.5);
+                            dronePosition.add(direction);
+                            droneAltitude = dronePosition.y;
+                            drone.position.copy(dronePosition);
+                            camera.lookAt(drone.position);
+                            updateDroneInfo();
+                        } else {
+                            index++;
+                        }
+                    } else {
+                        clearInterval(interval);
+                        updateStatus("Path following completed");
+                    }
+                }, 50);
+                updateStatus("Following Path");
+            }
+        }
+
+        // Takeoff function
+        function takeoff() {
+            if (!isFlying) {
+                isFlying = true;
+                basePosition.copy(drone.position); // Set the base position when taking off
+                dronePosition.y = 2;
+                droneAltitude = 2;
+                drone.position.copy(dronePosition);
+                updateStatus("Taking off");
+                updateDroneInfo();
+                manageBattery();
+            }
+        }
+
+        // Land function
+        function land() {
+            if (isFlying) {
+                if (droneAltitude > 100 && !isDroneVisible()) {
+                    returnToBase();
+                } else {
+                    normalLanding();
+                }
+            }
+        }
+
+        function normalLanding() {
+            isFlying = false;
+            dronePosition.y = 0;
+            droneAltitude = 0;
+            drone.position.copy(dronePosition);
+            updateStatus("Landing");
+            updateDroneInfo();
+        }
+
+        function returnToBase() {
+            updateStatus("Returning to base");
+            const interval = setInterval(function() {
+                const distanceToBase = drone.position.distanceTo(basePosition);
+                if (distanceToBase > 0.1) {
+                    const direction = new THREE.Vector3().subVectors(basePosition, drone.position).normalize();
+                    const newPosition = drone.position.clone().add(direction.multiplyScalar(0.5));
+
+                    if (!checkCollision(newPosition)) {
+                        drone.position.copy(newPosition);
+                        dronePosition.copy(drone.position);
+                        droneAltitude = dronePosition.y;
+                        camera.lookAt(drone.position);
+                        updateDroneInfo();
+                    } else {
+                        // If collision detected, try to move upwards
+                        newPosition.y += 0.5;
+                        if (!checkCollision(newPosition)) {
+                            drone.position.copy(newPosition);
+                            dronePosition.copy(drone.position);
+                            droneAltitude = dronePosition.y;
+                            camera.lookAt(drone.position);
+                            updateDroneInfo();
+                        }
+                    }
+                } else {
+                    clearInterval(interval);
+                    normalLanding();
+                }
+            }, 50);
+        }
+
+        function isDroneVisible() {
+            // This is a simplified check. In a real scenario, you'd implement more complex visibility calculations.
+            const distanceToCamera = drone.position.distanceTo(camera.position);
+            return distanceToCamera < 50; // Assume the drone is visible if it's within 50 units of the camera
+        }
+
+        // Update status display
+        function updateStatus(message) {
+            document.getElementById('status').textContent = `Status: ${message}`;
+        }
+
+        // Update drone info display
+        function updateDroneInfo() {
+            const infoElement = document.getElementById('droneInfo');
+            const distanceToBase = drone.position.distanceTo(basePosition);
+            infoElement.innerHTML = `
+                Position: (${dronePosition.x.toFixed(2)}, ${dronePosition.y.toFixed(2)}, ${dronePosition.z.toFixed(2)})<br>
+                Altitude: ${droneAltitude.toFixed(2)} m<br>
+                Distance to Base: ${distanceToBase.toFixed(2)} m<br>
+                Battery Life: ${batteryLife.toFixed(1)}%
+            `;
+        }
+
+        // Set base position
+        function setBasePosition() {
+            basePosition.copy(drone.position);
+            updateStatus("Base position set");
+        }
+
+        // Check for collisions
+        function checkCollision(position) {
+            const collisionObjects = scene.children.filter(obj =>
+                obj.isMesh && obj !== drone && obj !== plane);
+
+            for (let object of collisionObjects) {
+                if (object.position.distanceTo(position) < 1) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Resize the renderer when the window size changes
+        window.addEventListener('resize', function() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        function manageBattery() {
+            batteryInterval = setInterval(() => {
+                if (isFlying) {
+                    batteryLife -= 0.1;
+                    if (batteryLife <= 0) {
+                        batteryLife = 0;
+                        land();
+                        clearInterval(batteryInterval);
+                    }
+                    updateDroneInfo();
+                }
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
+

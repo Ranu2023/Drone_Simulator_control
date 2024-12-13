@@ -1,0 +1,4 @@
+flask==2.3.2
+@app.route('/')
+def home():
+    return render_template('index.html') 

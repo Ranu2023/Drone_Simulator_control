@@ -1,0 +1,99 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+#droneControlContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#droneCanvas {
+    border: 1px solid black;
+    background-color: #87CEEB;
+    margin-bottom: 20px;
+    position: relative;
+}
+
+.remoteButtons {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.buttonRow {
+    display: flex;
+    justify-content: center;
+    margin: 10px;
+}
+
+button {
+    padding: 15px 30px;
+    font-size: 18px;
+    margin: 10px;
+    border-radius: 8px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+button:active {
+    background-color: #388e3c;
+}
+
+#status {
+    margin-top: 15px;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.joystickContainer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 20px;
+}
+
+.joystickButton {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background-color: #009688;
+    border: none;
+    font-size: 20px;
+    color: white;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 5px 10px rgba(0, 0, 0, 0.1);
+}
+
+.joystickButton:hover {
+    background-color: #00796b;
+}
+
+.joystickButton:active {
+    background-color: #004d40;
+}
+
+.cloud {
+    position: absolute;
+    top: 20%;
+    width: 200px;
+    height: 100px;
+    background-color: white;
+    border-radius: 50%;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
